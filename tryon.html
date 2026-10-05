@@ -210,15 +210,44 @@ async function startCamera() {
   canvas.classList.toggle('mirror', mirror);
 }
 
-async function makeLandmarker() {
+// Download the hand model with progress: from this site first, Google's server as a backup.
+async function fetchModel(onProgress) {
+  let res = null;
+  try { res = await fetch('hand_landmarker.task'); } catch (e) { res = null; }
+  if (!res || !res.ok) res = await fetch(MP_MODEL);
+  if (!res.ok) throw new Error('Hand model download failed (' + res.status + ')');
+  const total = +res.headers.get('content-length') || 0;
+  if (!res.body || !total) return new Uint8Array(await res.arrayBuffer());
+  const reader = res.body.getReader();
+  const buf = new Uint8Array(total);
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf.set(value, got); got += value.length;
+    onProgress(Math.min(99, Math.round(got / total * 100)));
+  }
+  return got === total ? buf : buf.slice(0, got);
+}
+
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+
+async function makeLandmarker(setStatus) {
+  setStatus('Downloading hand model…');
+  const model = await fetchModel(pct => setStatus(`Downloading hand model… ${pct}%`));
+  setStatus('Loading tracking engine…');
   const files = await FilesetResolver.forVisionTasks(MP_WASM);
   const opts = (delegate) => ({
-    baseOptions: { modelAssetPath: MP_MODEL, delegate },
+    baseOptions: { modelAssetBuffer: model, delegate },
     runningMode: 'VIDEO', numHands: 1,
     minHandDetectionConfidence: 0.5, minHandPresenceConfidence: 0.5, minTrackingConfidence: 0.5
   });
-  try { return await HandLandmarker.createFromOptions(files, opts('GPU')); }
-  catch (e) { return await HandLandmarker.createFromOptions(files, opts('CPU')); }
+  setStatus('Starting hand tracking…');
+  try { return await withTimeout(HandLandmarker.createFromOptions(files, opts('GPU')), 15000); }
+  catch (e) {
+    setStatus('Starting hand tracking (compatibility mode)…');
+    return await HandLandmarker.createFromOptions(files, opts('CPU'));
+  }
 }
 
 document.getElementById('go').onclick = async () => {
@@ -227,8 +256,7 @@ document.getElementById('go').onclick = async () => {
   btn.disabled = true; btn.textContent = 'Starting…'; err.hidden = true;
   try {
     await startCamera();
-    btn.textContent = 'Loading hand tracking…';
-    landmarker = await makeLandmarker();
+    landmarker = await makeLandmarker(t => { btn.textContent = t; });
     document.getElementById('start').hidden = true;
     document.getElementById('sheet').hidden = false;
     hint.hidden = false;
