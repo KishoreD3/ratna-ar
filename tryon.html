@@ -6,6 +6,30 @@
 <title>Ratna Hand Try-On</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Figtree:wght@400;500;600&display=swap">
+<script>
+// On-screen log so problems on a phone can be read without developer tools.
+(function () {
+  const lines = [];
+  const t0 = Date.now();
+  function push(kind, args) {
+    const msg = Array.from(args).map(a => {
+      try { return a instanceof Error ? a.message : (typeof a === 'object' ? JSON.stringify(a) : String(a)); } catch (e) { return String(a); }
+    }).join(' ');
+    if (/GPU stall|GL Driver Message/.test(msg)) return;
+    lines.push(`${((Date.now() - t0) / 1000).toFixed(1)}s ${kind}: ${msg}`.slice(0, 220));
+    if (lines.length > 14) lines.shift();
+    const el = document.getElementById('ratnaLogView');
+    if (el) el.textContent = lines.join('\n');
+  }
+  ['log', 'warn', 'error', 'info'].forEach(k => {
+    const orig = console[k].bind(console);
+    console[k] = function () { push(k, arguments); orig.apply(null, arguments); };
+  });
+  window.addEventListener('error', e => push('error', [e.message || (e.target && e.target.src) || 'resource failed']), true);
+  window.addEventListener('unhandledrejection', e => push('error', [e.reason]));
+  window.ratnaLog = (...a) => push('step', a);
+})();
+</script>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
@@ -51,6 +75,8 @@ html, body { margin: 0; height: 100%; background: var(--ink); color: var(--fg); 
 .primary { border: 0; border-radius: 999px; background: var(--accent); color: #1b1314; font: 600 1rem var(--body); padding: 13px 24px; cursor: pointer; }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .err { color: #f3a4a4; font-size: .9rem; }
+.dbg { width: 100%; max-height: 32vh; overflow: auto; margin: 0; text-align: left; white-space: pre-wrap; word-break: break-word; font: .68rem/1.35 ui-monospace, Menlo, monospace; color: var(--muted); background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.dbg:empty { display: none; }
 .build { font-size: .75rem; color: var(--muted); opacity: .8; font-variant-numeric: tabular-nums; }
 </style>
 </head>
@@ -83,7 +109,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--gold); outline-
     <p>Allow camera access, then hold up the back of your hand with your fingers spread. The ring sits on your ring finger and follows it as you move.</p>
     <button class="primary" id="go" type="button">Start camera</button>
     <p class="err" id="err" hidden></p>
-    <p class="build">Build 4 · <span id="mode"></span> · <span id="elapsed"></span></p>
+    <p class="build">Build 5 · <span id="mode"></span> · <span id="elapsed"></span></p>
+    <pre class="dbg" id="ratnaLogView"></pre>
   </div>
 </div>
 
@@ -270,7 +297,7 @@ async function makeLandmarker(setStatus) {
     await new Promise(r => setTimeout(r, 50));   // let the message paint before the engine starts
     return await HandLandmarker.createFromOptions(files, opts('CPU'));
   }
-  setStatus('Starting hand tracking…');
+  setStatus('Starting hand tracking (GPU)…');
   try {
     return await withTimeout(HandLandmarker.createFromOptions(files, opts('GPU')), 20000);
   } catch (e) {
@@ -292,7 +319,9 @@ document.getElementById('go').onclick = async () => {
       if (e && e.message === 'timeout') throw new Error('The camera didn\'t start. Check that Chrome has camera permission for this site, close other apps using the camera, then try again.');
       throw e;
     }
-    landmarker = await makeLandmarker(t => { btn.textContent = t; });
+    window.ratnaLog('device', navigator.userAgent.replace(/^Mozilla\/5.0 /,''), 'cores', navigator.hardwareConcurrency, 'mem', navigator.deviceMemory || '?');
+    landmarker = await makeLandmarker(t => { if (!/%$/.test(t)) window.ratnaLog(t); btn.textContent = t; });
+    window.ratnaLog('tracking started');
     document.getElementById('start').hidden = true;
     document.getElementById('sheet').hidden = false;
     hint.hidden = false;
