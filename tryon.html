@@ -51,6 +51,7 @@ html, body { margin: 0; height: 100%; background: var(--ink); color: var(--fg); 
 .primary { border: 0; border-radius: 999px; background: var(--accent); color: #1b1314; font: 600 1rem var(--body); padding: 13px 24px; cursor: pointer; }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .err { color: #f3a4a4; font-size: .9rem; }
+.build { font-size: .75rem; color: var(--muted); opacity: .8; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -82,6 +83,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--gold); outline-
     <p>Allow camera access, then hold up the back of your hand with your fingers spread. The ring sits on your ring finger and follows it as you move.</p>
     <button class="primary" id="go" type="button">Start camera</button>
     <p class="err" id="err" hidden></p>
+    <p class="build">Build 4 · <span id="mode"></span> · <span id="elapsed"></span></p>
   </div>
 </div>
 
@@ -238,7 +240,9 @@ async function fetchWithProgress(urls, approxBytes, onProgress) {
 
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
 const blobUrl = (bytes, type) => URL.createObjectURL(new Blob([bytes], { type }));
-const useCpu = new URLSearchParams(location.search).get('cpu') === '1';
+// CPU mode is the default: the phone-GPU start-up runs on the main thread and can freeze the page on some Android phones.
+// Add ?gpu=1 to the address to try GPU mode.
+const useCpu = new URLSearchParams(location.search).get('gpu') !== '1';
 
 async function makeLandmarker(setStatus) {
   // 1. Hand model (~7.5 MB): this site first, Google's server as a backup
@@ -262,7 +266,8 @@ async function makeLandmarker(setStatus) {
     minHandDetectionConfidence: 0.5, minHandPresenceConfidence: 0.5, minTrackingConfidence: 0.5
   });
   if (useCpu) {
-    setStatus('Starting hand tracking (compatibility mode)…');
+    setStatus('Starting hand tracking…');
+    await new Promise(r => setTimeout(r, 50));   // let the message paint before the engine starts
     return await HandLandmarker.createFromOptions(files, opts('CPU'));
   }
   setStatus('Starting hand tracking…');
@@ -271,7 +276,7 @@ async function makeLandmarker(setStatus) {
   } catch (e) {
     // Never start a second engine in this page: the two clash. Reload in compatibility mode instead.
     setStatus('Switching to compatibility mode…');
-    const u = new URL(location.href); u.searchParams.set('cpu', '1'); u.searchParams.set('auto', '1');
+    const u = new URL(location.href); u.searchParams.delete('gpu'); u.searchParams.set('auto', '1');
     location.replace(u.toString());
     return new Promise(() => {});
   }
@@ -300,6 +305,14 @@ document.getElementById('go').onclick = async () => {
       : 'Couldn\'t start: ' + (e && e.message ? e.message : e);
   }
 };
+// Build/mode label and a stage timer, so a stuck step is easy to spot.
+document.getElementById('mode').textContent = useCpu ? 'CPU mode' : 'GPU mode';
+let stageText = '', stageStart = performance.now();
+setInterval(() => {
+  const t = document.getElementById('go').textContent;
+  if (t !== stageText) { stageText = t; stageStart = performance.now(); }
+  document.getElementById('elapsed').textContent = `${Math.round((performance.now() - stageStart) / 1000)} s on this step`;
+}, 500);
 // After an automatic switch to compatibility mode, carry on without another tap.
 if (new URLSearchParams(location.search).get('auto') === '1') document.getElementById('go').click();
 
