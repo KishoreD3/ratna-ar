@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ratna Hand Try-On</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Figtree:wght@400;500;600&display=swap">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+} }
+</script>
+<style>
+/* Layout: full-bleed camera with the ring overlaid; a slim top bar and a bottom sheet of controls. Single dark look so the camera feed reads well. */
+:root {
+  --ink: #120c0d;
+  --sheet: rgba(24, 16, 17, .88);
+  --fg: #f6ecdf;
+  --muted: #c1afa2;
+  --line: rgba(246, 236, 223, .18);
+  --accent: #d0606c;
+  --gold: #d9ab58;
+  --display: "Fraunces", Georgia, serif;
+  --body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--ink); color: var(--fg); font-family: var(--body); overflow: hidden; }
+#view { position: fixed; inset: 0; }
+#video, #gl { position: absolute; inset: 0; width: 100%; height: 100%; }
+#video { object-fit: cover; }
+.mirror { transform: scaleX(-1); }
+.top { position: fixed; top: 0; left: 0; right: 0; padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: linear-gradient(var(--ink), transparent); z-index: 2; }
+.top a { color: var(--fg); text-decoration: none; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
+.brand { font-family: var(--display); font-weight: 600; color: var(--gold); font-size: 1.15rem; }
+.hint { position: fixed; left: 16px; right: 16px; top: calc(env(safe-area-inset-top, 0px) + 64px); text-align: center; z-index: 2; pointer-events: none; }
+.hint span { display: inline-block; background: var(--sheet); border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font-size: .88rem; }
+.sheet { position: fixed; left: 0; right: 0; bottom: 0; padding: 14px 16px calc(env(safe-area-inset-bottom, 0px) + 16px); background: var(--sheet); border-top: 1px solid var(--line); backdrop-filter: blur(10px); display: grid; gap: 12px; z-index: 2; }
+.chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+.chip { flex: none; border: 1px solid var(--line); background: transparent; color: var(--fg); border-radius: 999px; padding: 7px 12px 7px 8px; font: 500 .85rem var(--body); display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.chip i { width: 16px; height: 16px; border-radius: 50%; display: inline-block; }
+.chip[aria-pressed="true"] { border-color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn { border: 1px solid var(--line); background: transparent; color: var(--fg); border-radius: 10px; padding: 9px 12px; font: 500 .85rem var(--body); cursor: pointer; }
+.start { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px 16px; z-index: 3; background: var(--ink); text-align: center; }
+.start-inner { max-width: 360px; display: grid; gap: 16px; justify-items: center; }
+.start h1 { font-family: var(--display); font-weight: 600; font-size: 1.6rem; margin: 0; color: var(--gold); text-wrap: balance; }
+.start p { margin: 0; color: var(--muted); line-height: 1.5; }
+.primary { border: 0; border-radius: 999px; background: var(--accent); color: #1b1314; font: 600 1rem var(--body); padding: 13px 24px; cursor: pointer; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.err { color: #f3a4a4; font-size: .9rem; }
+</style>
+</head>
+<body>
+<div id="view">
+  <video id="video" playsinline muted></video>
+  <canvas id="gl"></canvas>
+</div>
+
+<div class="top">
+  <a href="index.html" aria-label="Back to the design">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Design
+  </a>
+  <span class="brand">Ratna try-on</span>
+</div>
+<div class="hint" id="hint" hidden><span id="hintText">Show the back of your hand, fingers spread</span></div>
+
+<div class="sheet" id="sheet" hidden>
+  <div class="chips" id="metals"></div>
+  <div class="chips" id="stones"></div>
+  <div class="actions">
+    <button class="btn" id="flipCam" type="button">Switch camera</button>
+    <button class="btn" id="flipStone" type="button">Stone on wrong side? Flip</button>
+  </div>
+</div>
+
+<div class="start" id="start">
+  <div class="start-inner">
+    <h1>Try the ring on your hand</h1>
+    <p>Allow camera access, then hold up the back of your hand with your fingers spread. The ring sits on your ring finger and follows it as you move.</p>
+    <button class="primary" id="go" type="button">Start camera</button>
+    <p class="err" id="err" hidden></p>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { HandLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs';
+
+const MP_WASM = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm';
+const MP_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+
+// Ring model facts (metres): built with the finger axis along Z and the stone toward +Y.
+const RING_CENTER_Y = 0.01025;   // band centre height in the GLB
+const INNER_D = 0.0173;          // inner diameter
+const OCCLUDER_R = 0.0083;       // a little under the inner radius, stands in for the finger
+
+const METALS = [
+  { id: 'y22', name: '22k yellow', color: [1.0, 0.78, 0.34], swatch: '#e9bd5a', rough: 0.18 },
+  { id: 'r18', name: '18k rose',   color: [0.96, 0.66, 0.55], swatch: '#e7a58e', rough: 0.2 },
+  { id: 'w18', name: '18k white',  color: [0.92, 0.92, 0.9],  swatch: '#e6e5e1', rough: 0.15 },
+];
+const STONES = [
+  { id: 'ruby',     name: 'Ruby',     color: [0.62, 0.02, 0.09], swatch: '#9e0a1e' },
+  { id: 'emerald',  name: 'Emerald',  color: [0.03, 0.42, 0.2],  swatch: '#0b6b35' },
+  { id: 'sapphire', name: 'Sapphire', color: [0.05, 0.12, 0.55], swatch: '#14248f' },
+];
+const params = new URLSearchParams(location.search);
+let metal = METALS.find(m => m.id === params.get('metal')) || METALS[0];
+let stone = STONES.find(s => s.id === params.get('stone')) || STONES[0];
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('gl');
+const hint = document.getElementById('hint'), hintText = document.getElementById('hintText');
+let facing = 'environment';
+let stoneSign = 1;
+let stream = null;
+
+// ---------- three.js ----------
+const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.add(new THREE.DirectionalLight(0xffffff, 1.2).translateZ(1000).translateY(400));
+
+let W = innerWidth, H = innerHeight;
+const cam = new THREE.OrthographicCamera(0, W, 0, -H, -5000, 5000);
+cam.position.z = 1000;
+
+const ringGroup = new THREE.Group();   // origin = finger axis at the ring's centre
+ringGroup.visible = false;
+scene.add(ringGroup);
+const mats = {};
+
+// Occluder: invisible "finger" that hides the back half of the band
+const occ = new THREE.Mesh(
+  new THREE.CylinderGeometry(OCCLUDER_R, OCCLUDER_R, 0.09, 32),
+  new THREE.MeshBasicMaterial({ colorWrite: false })
+);
+occ.rotation.x = Math.PI / 2;   // cylinder axis Y -> Z (finger axis)
+occ.position.z = 0.015;         // extend more toward the fingertip
+occ.renderOrder = -1;
+ringGroup.add(occ);
+
+new GLTFLoader().load('ratna_ring.glb', gltf => {
+  const m = gltf.scene;
+  m.position.y = -RING_CENTER_Y;
+  m.traverse(o => {
+    if (o.isMesh) { mats[o.material.name] = o.material; o.renderOrder = 1; }
+  });
+  ringGroup.add(m);
+  applyMaterials();
+});
+
+function applyMaterials() {
+  const g = mats['gold_22k'], r = mats['ruby'];
+  if (g) { g.color.setRGB(...metal.color, THREE.LinearSRGBColorSpace); g.roughness = metal.rough; g.metalness = 1; }
+  if (r) { r.color.setRGB(...stone.color, THREE.LinearSRGBColorSpace); r.roughness = 0.05; }
+}
+
+function resize() {
+  W = innerWidth; H = innerHeight;
+  renderer.setSize(W, H, false);
+  cam.left = 0; cam.right = W; cam.top = 0; cam.bottom = -H;
+  cam.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+// ---------- controls ----------
+function chips(el, list, current, onPick) {
+  el.innerHTML = '';
+  list.forEach(item => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'chip';
+    b.setAttribute('aria-pressed', item === current);
+    b.innerHTML = `<i style="background:${item.swatch}"></i>${item.name}`;
+    b.onclick = () => { onPick(item); [...el.children].forEach(c => c.setAttribute('aria-pressed', c === b)); applyMaterials(); };
+    el.appendChild(b);
+  });
+}
+chips(document.getElementById('metals'), METALS, metal, m => metal = m);
+chips(document.getElementById('stones'), STONES, stone, s => stone = s);
+document.getElementById('flipStone').onclick = () => { stoneSign *= -1; };
+document.getElementById('flipCam').onclick = async () => {
+  facing = facing === 'environment' ? 'user' : 'environment';
+  await startCamera();
+};
+
+// ---------- camera + hand tracking ----------
+let landmarker = null;
+
+async function startCamera() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
+  });
+  video.srcObject = stream;
+  await video.play();
+  const mirror = facing === 'user';
+  video.classList.toggle('mirror', mirror);
+  canvas.classList.toggle('mirror', mirror);
+}
+
+async function makeLandmarker() {
+  const files = await FilesetResolver.forVisionTasks(MP_WASM);
+  const opts = (delegate) => ({
+    baseOptions: { modelAssetPath: MP_MODEL, delegate },
+    runningMode: 'VIDEO', numHands: 1,
+    minHandDetectionConfidence: 0.5, minHandPresenceConfidence: 0.5, minTrackingConfidence: 0.5
+  });
+  try { return await HandLandmarker.createFromOptions(files, opts('GPU')); }
+  catch (e) { return await HandLandmarker.createFromOptions(files, opts('CPU')); }
+}
+
+document.getElementById('go').onclick = async () => {
+  const err = document.getElementById('err');
+  const btn = document.getElementById('go');
+  btn.disabled = true; btn.textContent = 'Starting…'; err.hidden = true;
+  try {
+    await startCamera();
+    btn.textContent = 'Loading hand tracking…';
+    landmarker = await makeLandmarker();
+    document.getElementById('start').hidden = true;
+    document.getElementById('sheet').hidden = false;
+    hint.hidden = false;
+    requestAnimationFrame(loop);
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Try again';
+    err.hidden = false;
+    err.textContent = e && e.name === 'NotAllowedError'
+      ? 'Camera access was blocked. Allow the camera for this site in Chrome\'s settings, then try again.'
+      : 'Couldn\'t start: ' + (e && e.message ? e.message : e);
+  }
+};
+
+// Map a normalised landmark to screen pixels, matching the video's object-fit: cover.
+function toWorld(lm) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const k = Math.max(W / vw, H / vh);
+  const ox = (W - vw * k) / 2, oy = (H - vh * k) / 2;
+  return new THREE.Vector3(ox + lm.x * vw * k, -(oy + lm.y * vh * k), -lm.z * vw * k);
+}
+
+const tgtPos = new THREE.Vector3(), tgtQuat = new THREE.Quaternion();
+let tgtScale = 1, lastSeen = 0, lastTime = -1, hasPose = false;
+const basis = new THREE.Matrix4();
+
+function loop(now) {
+  requestAnimationFrame(loop);
+  if (landmarker && video.readyState >= 2 && video.currentTime !== lastTime) {
+    lastTime = video.currentTime;
+    const res = landmarker.detectForVideo(video, now);
+    if (res.landmarks && res.landmarks.length) {
+      const L = res.landmarks[0].map(toWorld);
+      const label = (res.handedness || res.handednesses)?.[0]?.[0]?.categoryName || 'Right';
+
+      // Ring finger: 13 = knuckle (MCP), 14 = middle joint (PIP)
+      const along = new THREE.Vector3().subVectors(L[14], L[13]);
+      const pos = L[13].clone().addScaledVector(along, 0.4);
+      const z = along.clone().normalize();
+
+      // Back-of-hand direction from the palm plane (wrist, index knuckle, little-finger knuckle).
+      // MediaPipe labels hands as if the image were mirrored, so 'Left' here is a right hand in the raw frame.
+      const a = new THREE.Vector3().subVectors(L[5], L[0]);
+      const b = new THREE.Vector3().subVectors(L[17], L[0]);
+      const n = new THREE.Vector3().crossVectors(a, b).normalize();
+      const dorsal = n.multiplyScalar((label === 'Left' ? -1 : 1) * stoneSign);
+      const y = dorsal.sub(z.clone().multiplyScalar(dorsal.dot(z))).normalize();
+      const x = new THREE.Vector3().crossVectors(y, z).normalize();
+      basis.makeBasis(x, y, z);
+      tgtQuat.setFromRotationMatrix(basis);
+
+      // Finger width ≈ spacing of neighbouring knuckles
+      const width = (L[13].distanceTo(L[9]) + L[13].distanceTo(L[17])) / 2 * 0.92;
+      tgtScale = width / INNER_D;
+      tgtPos.copy(pos);
+      lastSeen = now;
+
+      if (!hasPose) { ringGroup.position.copy(tgtPos); ringGroup.quaternion.copy(tgtQuat); ringGroup.scale.setScalar(tgtScale); hasPose = true; }
+      hintText.textContent = 'Move slowly. Turn your hand to see the stone.';
+    }
+  }
+
+  const visible = now - lastSeen < 250 && hasPose;
+  ringGroup.visible = visible;
+  if (!visible) { hasPose = false; hintText.textContent = 'Show the back of your hand, fingers spread'; }
+  else {
+    ringGroup.position.lerp(tgtPos, 0.55);
+    ringGroup.quaternion.slerp(tgtQuat, 0.5);
+    const s = ringGroup.scale.x + (tgtScale - ringGroup.scale.x) * 0.4;
+    ringGroup.scale.setScalar(s);
+  }
+  renderer.render(scene, cam);
+}
+</script>
+</body>
+</html>

@@ -67,6 +67,7 @@ h2 { font-family: var(--display); font-weight: 500; font-size: 1.15rem; margin: 
 input[type=range] { width: 100%; accent-color: var(--accent); }
 label.file { display: inline-flex; gap: 8px; align-items: center; border: 1px dashed var(--gold); border-radius: 10px; padding: 10px 14px; cursor: pointer; font-weight: 500; color: var(--fg); }
 label.file input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.tryon { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 999px; padding: 11px 18px; background: transparent; color: var(--accent); border: 1.5px solid var(--accent); font-weight: 600; text-decoration: none; }
 .reset { border: 0; background: none; color: var(--accent); font: 500 .85rem var(--body); cursor: pointer; padding: 0; text-decoration: underline; justify-self: start; }
 .small { font-size: .82rem; color: var(--muted); margin: 0; }
 ol.tests { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; font-size: .9rem; }
@@ -128,6 +129,15 @@ ol.tests { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; font-size: .
           <input id="size" type="range" min="4" max="12" step="0.5" value="7">
           <p class="small">Scales the whole piece so AR shows it at the chosen size.</p>
         </div>
+        <div class="row">
+          <span class="lbl">Size in AR</span>
+          <div class="chips" id="arSizes"></div>
+          <p class="small">At true size the ring is about 2 cm, so it's easy to miss. Start with Enlarged to find it, then switch to true size.</p>
+        </div>
+        <a class="tryon" id="tryon" href="tryon.html">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 13V5a1.5 1.5 0 0 1 3 0v6m0-1V3.5a1.5 1.5 0 0 1 3 0V11m0-6a1.5 1.5 0 0 1 3 0v7m0-3.5a1.5 1.5 0 0 1 3 0V15a7 7 0 0 1-7 7h-1.5a6 6 0 0 1-5-2.7L3.4 15a1.6 1.6 0 0 1 2.6-1.8L8 15"/></svg>
+          Try it on your hand
+        </a>
       </div>
 
       <div class="card">
@@ -143,8 +153,9 @@ ol.tests { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; font-size: .
 
       <div class="card">
         <span class="lbl">What to check in AR</span>
+        <p class="small">After tapping "View in your space", point the camera at a table and move the phone slowly from side to side until the surface is found. The ring then appears on it.</p>
         <ol class="tests">
-          <li>Place it next to a real ring. Does the size match?</li>
+          <li>Place it next to a real ring at true size. Does the size match?</li>
           <li>Walk around it. Does the gold reflect, or look like plastic?</li>
           <li>Get close. Do the beads and the stone hold up?</li>
           <li>Change metal and stone, then reopen AR. Do the swaps carry over?</li>
@@ -172,7 +183,11 @@ const STONES = [
   { id: 'emerald',  name: 'Emerald',  color: [0.03, 0.42, 0.2],  swatch: '#0b6b35' },
   { id: 'sapphire', name: 'Sapphire', color: [0.05, 0.12, 0.55], swatch: '#14248f' },
 ];
-let metal = METALS[0], stone = STONES[0], size = 7;
+const AR_SIZES = [
+  { id: 'big',  name: 'Enlarged 5×', mult: 5, swatch: 'transparent' },
+  { id: 'true', name: 'True size',   mult: 1, swatch: 'transparent' },
+];
+let metal = METALS[0], stone = STONES[0], size = 7, arSize = AR_SIZES[0];
 
 const diameter = s => 11.63 + 0.8128 * s;   // US size → inner diameter (mm)
 
@@ -182,7 +197,8 @@ function chips(el, list, current, onPick) {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'chip';
     b.setAttribute('aria-pressed', item === current);
-    b.innerHTML = `<i style="background:${item.swatch}"></i>${item.name}`;
+    b.innerHTML = item.swatch === 'transparent' ? item.name : `<i style="background:${item.swatch}"></i>${item.name}`;
+    if (item.swatch === 'transparent') b.style.paddingLeft = '12px';
     b.onclick = () => { onPick(item); [...el.children].forEach(c => c.setAttribute('aria-pressed', c === b)); };
     el.appendChild(b);
   });
@@ -201,9 +217,13 @@ function updateSpec() {
   const d = diameter(size), f = d / BASE_D;
   const sizeTxt = `US ${size} · ${d.toFixed(1)} mm`;
   document.getElementById('sizeVal').textContent = sizeTxt;
+  const t = document.getElementById('tryon');
+  if (t) t.href = `tryon.html?metal=${metal.id}&stone=${stone.id}`;
   if (!isSample) return;
-  mv.scale = `${f} ${f} ${f}`;
-  document.getElementById('scaleChip').textContent = `1 : 1 · ${d.toFixed(1)} mm inner Ø`;
+  const k = f * arSize.mult;
+  mv.scale = `${k} ${k} ${k}`;
+  document.getElementById('scaleChip').textContent = arSize.mult === 1
+    ? `1 : 1 · ${d.toFixed(1)} mm inner Ø` : `${arSize.mult}× enlarged · ${d.toFixed(1)} mm inner Ø`;
   document.getElementById('specSize').textContent = `US ${size} · ${d.toFixed(1)} mm inner Ø`;
   document.getElementById('specMetal').textContent = metal.name;
   document.getElementById('specStone').textContent = `${stone.name} cabochon, oval 8 × 6 mm, bezel set`;
@@ -212,6 +232,8 @@ function updateSpec() {
 
 chips(document.getElementById('metals'), METALS, metal, m => { metal = m; applyMaterials(); updateSpec(); });
 chips(document.getElementById('stones'), STONES, stone, s => { stone = s; applyMaterials(); updateSpec(); });
+if (!window.RATNA_HOSTED) document.getElementById('tryon').hidden = true;
+chips(document.getElementById('arSizes'), AR_SIZES, arSize, a => { arSize = a; updateSpec(); });
 document.getElementById('size').addEventListener('input', e => { size = +e.target.value; updateSpec(); });
 
 mv.addEventListener('load', () => { applyMaterials(); updateSpec(); });
